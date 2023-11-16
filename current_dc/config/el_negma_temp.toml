@@ -1,0 +1,68 @@
+#=-= Define Interface Modules =-=
+[interface.ser0]
+    module="serial"
+    class="Serial"
+[interface.ser0.config]
+    port='/dev/ttyACM0'
+    baudrate=115200
+
+#=-= Define Device Modules =-=
+[device.json_1]
+    module="gen_string"
+    class="SerialJSON"
+    interface="ser0"
+[device.json_1.config]
+    spec = {"temp_in"="$.T"}
+#[device.json_1.variables]
+#    var_in = "t_in"
+
+
+#=-= Define Calculation Modules =-=
+[calculation.calibration]
+    module="gen_calibrate"
+    class="MultiplierOffset"
+[calculation.calibration.config]
+    multiplier = 1
+    offset = 5
+[calculation.calibration.variables]
+    raw_value = "temp_in"
+    calibrated_value = "temperature"
+
+#=-= Define Calculation Pipelines =-=
+[pipelines]
+    default = ["calibration"]
+
+#=-= Define Measurements Pipelines =-=
+[measurement]
+    module="gen_sample"
+    class="SingleSample"
+[measurement.config]
+    period = 1.0 # seconds
+[[measurement.sensing_stacks]]
+    device = "json_1"
+    pipeline = "default"
+#    constants = {'phase'='single'}
+
+
+[output]
+    path = "power_monitoring/{{machine}}"
+[output.spec]
+    timestamp = '$.timestamp'
+    temperature = '$.temperature'
+    machine="#Machine_1"
+
+
+[mqtt]
+    broker = "mqtt.docker.local"
+    port = 1883   #common mqtt ports are 1883 and 8883
+    base_topic_template = ""
+
+    #reconnection characteristics
+    # start: timeout = initial,
+    # if timeout < limit then
+    #   timeout = timeout*backoff
+    # else
+    #   timeout = limit
+    reconnect.initial = 5 # seconds
+    reconnect.backoff = 2 # multiplier
+    reconnect.limit = 60 # seconds

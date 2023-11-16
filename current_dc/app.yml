@@ -3,6 +3,9 @@ version: "2"
 services:
     app:
         build: .
+        command: ["python","main.py","--log","info"]
         privileged: true
         volumes:
             - ./config:/app/config
+        environment:
+            - DCSM_CONFIG=/app/config/mfm_power_monitoring_single_phase.toml

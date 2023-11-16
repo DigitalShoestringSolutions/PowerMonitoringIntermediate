@@ -1,63 +1,59 @@
-# ----------------------------------------------------------------------
-#
-#    Power Monitoring (Basic solution) -- This digital solution measures,
-#    reports and records both AC power and current consumed by an electrical 
-#    equipment, so that its energy consumption can be understood and 
-#    taken action upon. This version comes with one current transformer 
-#    clamp of 20A that is buckled up to the electric line the equipment 
-#    is connected to. The solution provides a Grafana dashboard that 
-#    displays current and power consumption, and an InfluxDB database 
-#    to store timestamp, current and power. 
-#
-#    Copyright (C) 2022  Shoestring and University of Cambridge
-#
-#    This program is free software: you can redistribute it and/or modify
-#    it under the terms of the GNU General Public License as published by
-#    the Free Software Foundation, version 3 of the License.
-#
-#    This program is distributed in the hope that it will be useful,
-#    but WITHOUT ANY WARRANTY; without even the implied warranty of
-#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#    GNU General Public License for more details.
-#
-#    You should have received a copy of the GNU General Public License
-#    along with this program.  If not, see https://www.gnu.org/licenses/.
-#
-# ----------------------------------------------------------------------
- 
-
-# run at poll rate
-# make requests
-# extract variables
-# output variables
-
-import datetime
+import traceback
 import logging
 import multiprocessing
 import time
-
+import datetime
+import signal
+import asyncio
 import importlib
+import core.pipeline
+import core.sensing_stack
+import core.output
+import core.exceptions
 import zmq
-import modbus_sensor as sen
-# import calculate as calc
 
 logger = logging.getLogger("main.measure")
 context = zmq.Context()
 
+terminate_flag = False
 
-class CurrentMeasureBuildingBlock(multiprocessing.Process):
+
+def setup_signal_handlers():
+    signal.signal(signal.SIGINT, graceful_signal_handler)
+    signal.signal(signal.SIGTERM, graceful_signal_handler)
+
+
+def graceful_signal_handler(sig, _frame):
+    logger.info(f'Received {signal.Signals(sig).name}. Triggering graceful termination.')
+    global terminate_flag
+    terminate_flag = True
+    signal.alarm(10)
+
+
+class BuildingBlockFramework(multiprocessing.Process):
     def __init__(self, config, zmq_conf):
         super().__init__()
 
         self.config = config
-        self.constants = config['constants']
+        self.name = config.get("service_module_name","sensing_dc")
+
+        self.interface_config = config['interface']
+        self.device_config = config['device']
+        self.calculation_config = config['calculation']
+        self.pipeline_config = config['pipelines']
+        self.measurement_config = config['measurement']
+        self.output_config = config['output']
 
         # declarations
+        self.interfaces = {}
+        self.devices = {}
+        self.calculations = {}
+        self.pipelines = {}
+        self.sensing_stacks = []
+        self.measurement_module = None
+
         self.zmq_conf = zmq_conf
         self.zmq_out = None
-
-        self.collection_interval = config['sampling']['sample_interval']
-        self.sample_count = config['sampling']['sample_count']
 
     def do_connect(self):
         self.zmq_out = context.socket(self.zmq_conf['type'])
@@ -66,86 +62,154 @@ class CurrentMeasureBuildingBlock(multiprocessing.Process):
         else:
             self.zmq_out.connect(self.zmq_conf["address"])
 
-    def run(self):
-        logger.info("started")
-        self.do_connect()
+    def run(self):  # Execution Starts Here
+        setup_signal_handlers()
 
-        # timezone determination
+        logger.info("+---Started")
+        self.do_connect()
+        # Load Elements
+        logger.info("+---Loading Modules")
+        self.load_modules()
+        self.create_pipelines()
+        self.create_sensing_stacks()
+
+        asyncio.run(self.async_loop())
+
+    # could be multiplexed as measurement loops
+    async def async_loop(self):
+        # Initialise Elements
+        logger.info("+---Initialising Modules")
+        await self.initialise_interfaces()
+        self.initialise_devices()
+        self.initialise_pipelines()
+        self.initialise_sensing_stacks()
+        self.initialise_measurement()
+
+        logger.info("+---Starting Loop")
+        while terminate_flag is False:
+            try:
+                delay, output_vars = await self.measurement_module.loop()
+
+                if output_vars:
+                    payload = self.generate_output(output_vars, self.output_config)
+                    self.dispatch(payload)
+
+                await asyncio.sleep(delay)
+            except core.exceptions.SampleError as e:
+                logger.error(f"Sample Error for device {e.device}: {e} - pausing for 30 seconds")
+                self.dispatch_error('device',e.device,str(e))
+                await asyncio.sleep(30)
+            except core.exceptions.CalculationError as e:
+                logger.error(f"Sample Error for device {e.module}: {e} - pausing for 30 seconds")
+                self.dispatch_error('calculation',e.module,str(e))
+                await asyncio.sleep(30)
+            except Exception as e:
+                logger.error(f"Error during sampling: {traceback.format_exc()} - pausing for 30 seconds")
+                await asyncio.sleep(30)
+
+        logger.info("Done")
+
+    def load_modules(self):
+        # load general modules
+        self.load_module_list(self.interfaces, 'core.interface_modules', self.interface_config, ['config'])
+        self.load_module_list(self.devices, 'core.device_modules', self.device_config)
+        self.load_module_list(self.calculations, 'core.calculation_modules', self.calculation_config)
+
+        # load measurement
+        self.measurement_module = self.load_single_module(
+            'core.measurement_modules',
+            self.measurement_config['module'],
+            self.measurement_config['class'],
+            {
+                'config': self.measurement_config.get('config')
+            })
+        logger.debug(f"Loaded measurement: {self.measurement_module}")
+
+    def load_module_list(self, output_dict, prefix, spec_dict, args=['config', 'variables']):
+        for name, spec in spec_dict.items():
+            output_dict[name] = self.load_single_module(
+                prefix,
+                spec['module'],
+                spec['class'],
+                {arg: spec.get(arg) for arg in args}
+            )
+        logger.debug(f"Loaded list: {output_dict}")
+
+    def load_single_module(self, prefix, module_name, class_name, class_args):
+        full_module_name = f"{prefix}.{module_name}"
+        # get correct module
+        try:
+            module = importlib.import_module(full_module_name)
+            logger.debug(f"Imported {full_module_name}")
+        except ModuleNotFoundError:
+            logger.error(f"Unable to import module {full_module_name}. Service Module may not function as intended")
+            logger.error(traceback.format_exc())
+            return
+
+        # get class in module
+        klass = getattr(module, class_name)
+        obj = klass(**class_args)
+        logger.info(f"Loaded: {full_module_name} > {class_name}")
+        return obj
+
+    def create_pipelines(self):
+        self.pipelines = {name: core.pipeline.Pipeline(spec) for name, spec in self.pipeline_config.items()}
+
+    def create_sensing_stacks(self):
+        self.sensing_stacks = [core.sensing_stack.SensingStack(stack) for stack in
+                               self.measurement_config['sensing_stacks']]
+
+    async def initialise_interfaces(self):
+        for _name, interface in self.interfaces.items():
+            if interface is not None:
+                result = interface.initialise()
+                if asyncio.iscoroutine(result):
+                    await result
+
+    def initialise_devices(self):
+        for dev_name, dev_spec in self.device_config.items():
+            device = self.devices[dev_name]
+            interface = self.interfaces[dev_spec['interface']]
+            if device is not None:
+                device.initialise(interface)
+
+    def initialise_pipelines(self):
+        for _name, pipeline in self.pipelines.items():
+            if pipeline is not None:
+                pipeline.initialise(self.calculations)
+
+    def initialise_sensing_stacks(self):
+        for stack in self.sensing_stacks:
+            if stack is not None:
+                stack.initialise(self.devices, self.pipelines)
+
+    def initialise_measurement(self):
+        self.measurement_module.initialise(self.sensing_stacks)
+
+    def get_timestamp(self):
         __dt = -1 * (time.timezone if (time.localtime().tm_isdst == 0) else time.altzone)
         tz = datetime.timezone(datetime.timedelta(seconds=__dt))
-        #
-        today = datetime.datetime.now().date()
-        next_check = (datetime.datetime(today.year, today.month, today.day) + datetime.timedelta(days=1)).timestamp()
+        return datetime.datetime.now(tz=tz).isoformat()
 
-        run = True
-        period = self.collection_interval
+    def generate_output(self, var_dict, output_config):
+        timestamp = self.get_timestamp()
 
+        dataset = {**var_dict, "timestamp": timestamp}
 
-        adapter_addr = self.config["modbus"]["adapter_addr"]
-        adapter_port = self.config["modbus"]["adapter_port"]
-        slave_id = self.config["modbus"]["slave_id"]
-        voltage = self.config["modbus"]["fixed_voltage"]
-        machine_name = self.config["constants"]["machine"]
+        payload = core.output.generate_json_path_message(dataset, output_config['spec'])
+        # payload = core.output.generate_basic_output(dataset,output_spec)
 
-        num_samples = 0
-        sample_accumulator = 0
-
-        sleep_time = period
-        t = time.time()
-        
-        while run:
-            t += period
-            sensor = sen.ModbusPower(adapter_addr, adapter_port)
-            # Collect samples from ADC
-            try:
-                reading = sensor.action_push(slave_id, machine_name, voltage)
-                sample = reading['reading1']
-                # sample = sensor
-                # logger.info("CurrentMeasureBuildingBlock- STAGE-3 done")
-                sample_accumulator += sample
-                num_samples+=1
-            except Exception as e:
-                logger.error(f"Sampling led to exception{e}")
-
-            # handle timestamps and timezones
-            if time.time() > next_check:
-                __dt = -1 * (time.timezone if (time.localtime().tm_isdst == 0) else time.altzone)
-                tz = datetime.timezone(datetime.timedelta(seconds=__dt))
-                # set up next check
-                today = datetime.datetime.now().date()
-                next_check = (datetime.datetime(today.year, today.month, today.day) + datetime.timedelta(
-                    days=1)).timestamp()
-
-            # dispatch messages
-            if num_samples >= self.sample_count:
-                average_sample = sample_accumulator / self.sample_count
-                num_samples = 0
-                sample_accumulator = 0
-                print(average_sample)
-                logger.info(f"current_reading: {average_sample}")
-
-
-
-                # capture timestamp
-                timestamp = datetime.datetime.now(tz=tz).isoformat()
-
-                # convert
-                # results = calculation.calculate(average_sample)
-                # payload = {**results, **self.constants, "timestamp": timestamp}
-                payload = {"machine": self.constants['machine'], "Current": str(reading['reading1']), "Voltage": str(reading['reading2']), "Power": str(reading['reading3']), "sensor": "Modbus", "timestamp": timestamp}
-                # send
-                output = {"path": "", "payload": payload}
-                self.dispatch(output)
-
-            # handle sample rate
-            if sleep_time <= 0:
-                logger.warning(f"previous loop took longer that expected by {-sleep_time}s")
-                t = t - sleep_time  # prevent free-wheeling to make up the slack
-
-            sleep_time = t - time.time()
-            time.sleep(max(0.0, sleep_time))
-        logger.info("done")
+        return {'path': output_config.get('path', ""), 'payload': payload}
 
     def dispatch(self, output):
-        logger.info(f"dispatch to { output['path']} of {output['payload']}")
+        logger.debug(f"dispatch to {output.get('path', '')} of {output['payload']}")
         self.zmq_out.send_json({'path': output.get('path', ""), 'payload': output['payload']})
+
+    def dispatch_error(self,type,id,reason):
+        payload = {
+            'type': type,
+            'id': id,
+            'reason': reason,
+            'timestamp': self.get_timestamp()
+        }
+        self.zmq_out.send_json({'path': f'/error/{self.name}', 'payload': payload})

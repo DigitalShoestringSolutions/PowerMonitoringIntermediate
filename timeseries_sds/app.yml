@@ -16,7 +16,7 @@ services:
           - DOCKER_INFLUXDB_INIT_BUCKET=${DB_BUCKET}
           - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=${DB_ADMIN_INITIAL_TOKEN}
     telegraf:
-        image: telegraf:1.21
+        image: telegraf:1.28.4
         volumes:
           - ./config/telegraf.conf:/etc/telegraf/telegraf.conf
         environment: 

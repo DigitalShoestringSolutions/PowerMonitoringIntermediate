@@ -1,0 +1,72 @@
+#=-= Define Interface Modules =-=
+[interface.mb1]
+    module="modbus"
+    class="ModbusTCPSync"
+[interface.mb1.config]
+    adapter_addr="192.168.0.7"
+    adapter_port=502
+
+#=-= Define Device Modules =-=
+[device.mfm1]
+    module="multi_function_meter_HOBUT"
+    class="HOBUT_850_LTHN"
+    interface="mb1"
+[device.mfm1.config]
+    slave_id=1
+[device.mfm1.variables]
+    I_in = "current_rms"
+    freq = "freq"
+    thd = "thd"
+    status = "status"
+
+#=-= Define Calculation Modules =-=
+[calculation.power]
+    module="gen_electrical"
+    class="PowerToCurrent"
+[calculation.power.config]
+#    line_voltage = 400
+    phase_voltage = 230
+    phases = 3
+[calculation.power.variables]
+    power_in = "power"
+    rms_current_out = "current_rms"
+
+#=-= Define Calculation Pipelines =-=
+[pipelines]
+    power_pipeline = ["power"]
+
+#=-= Define Measurements Pipelines =-=
+[measurement]
+    module="gen_sample"
+    class="SingleSample"
+[measurement.config]
+    period = 1.0 # seconds
+[[measurement.sensing_stacks]]
+    device = "mfm1"
+    pipeline = "power_pipeline"
+    constants = {'phase'='combined'}
+
+[output]
+    path = "power_monitoring/{{machine}}"
+[output.spec]
+    timestamp = '$.timestamp'
+    power = '$.power'
+    current = "$.current_rms"
+    phase = "$.phase"
+    machine="#Machine_1"
+    status = "$.status"
+
+[mqtt]
+    broker = "mqtt.docker.local"
+    port = 1883   #common mqtt ports are 1883 and 8883
+    base_topic_template = ""
+
+    #reconnection characteristics
+    # start: timeout = initial,
+    # if timeout < limit then
+    #   timeout = timeout*backoff
+    # else
+    #   timeout = limit
+    reconnect.initial = 5 # seconds
+    reconnect.backoff = 2 # multiplier
+    reconnect.limit = 60 # seconds
