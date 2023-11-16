@@ -15,9 +15,9 @@
     slave_id=1
 [device.mfm1.variables]
     I_in = "current_rms"
-    freq = "freq"
-    thd = "thd"
-    status = "status"
+	V_in = "v_unused"
+	thd_v = "tv_unused"
+	thd_i = "ti_unused"
 
 #=-= Define Calculation Modules =-=
 [calculation.power]
