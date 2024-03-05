@@ -132,7 +132,7 @@ class CurrentMeasureBuildingBlock(multiprocessing.Process):
                 # convert
                 # results = calculation.calculate(average_sample)
                 # payload = {**results, **self.constants, "timestamp": timestamp}
-                payload = {"machine": self.constants['machine'], "Current": str(reading['reading1']), "Voltage": str(reading['reading2']), "Power": str(reading['reading3']), "sensor": "Modbus", "timestamp": timestamp}
+                payload = {"machine": self.constants['machine'], "current": str(reading['reading1']), "voltage": str(reading['reading2']), "power": str(reading['reading3']), "sensor": "Modbus", "timestamp": timestamp}
                 # send
                 output = {"path": "", "payload": payload}
                 self.dispatch(output)
