@@ -24,7 +24,7 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": 8,
+  "id": 3,
   "links": [
     {
       "asDropdown": true,
@@ -169,8 +169,8 @@
               "start": 0
             },
             "renameByName": {
-              "_value": "Value",
-              "start": "Period"
+              "_value": "Average Power",
+              "start": "Period Starting"
             }
           }
         }
@@ -286,9 +286,9 @@
       },
       {
         "current": {
-          "selected": false,
-          "text": "hour",
-          "value": "1h"
+          "selected": true,
+          "text": "10 minutes",
+          "value": "10m"
         },
         "hide": 0,
         "includeAll": false,
@@ -297,12 +297,12 @@
         "name": "period",
         "options": [
           {
-            "selected": false,
+            "selected": true,
             "text": "10 minutes",
             "value": "10m"
           },
           {
-            "selected": true,
+            "selected": false,
             "text": "hour",
             "value": "1h"
           },
@@ -332,13 +332,13 @@
     ]
   },
   "time": {
-    "from": "now-30d",
+    "from": "now-3h",
     "to": "now"
   },
   "timepicker": {},
   "timezone": "browser",
   "title": "Trend (All)",
   "uid": "i6b8d74Ik",
-  "version": 9,
+  "version": 2,
   "weekStart": ""
 }
