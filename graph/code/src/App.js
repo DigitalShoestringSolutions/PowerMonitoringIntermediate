@@ -202,7 +202,7 @@ function Graph({ config }) {
   };
 
   return (
-    <Line options={options} data={graph_data} />
+    <Line options={options} data={graph_data} id="darkgraph"/>
   );
 }
 

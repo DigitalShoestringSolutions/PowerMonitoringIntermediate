@@ -6,3 +6,13 @@ body, #root{
 #root{
   height: 100vh;
 }
+
+#darkgraph {
+  /* Dark background fill for the Chart.js graph to match the Grafana plots */
+  
+  /* Match grafana dark theme plot background of #181B1F */
+  background-color:#181B1F;
+
+  /* Match grafana dark theme font color for axes */
+  color: #C7C7D7;
+}

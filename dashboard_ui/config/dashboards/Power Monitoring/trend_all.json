@@ -61,7 +61,7 @@
           "showLineNumbers": false,
           "showMiniMap": false
         },
-        "content": " <iframe id=\"embeddedFrame\" src=\"#\" width=\"100%\" height=\"100%\"> </iframe>\r\n<script>\r\nvar iframe = document.getElementById(\"embeddedFrame\");\r\n    iframe.src = \"http://\"+window.location.hostname+\"${analysis_sm}\"+\"/all_graph?bucket=${const_bucket}&period=${period}&from=${__from}&to=${__to}\"\r\n\r\n    function setIframeHeight() {\r\n      iframe.style.height = iframe.parentElement.offsetHeight + \"px\";\r\n    }\r\n\r\n    // Call setIframeHeight when the iframe content is loaded\r\n    //iframe.onload = setIframeHeight;\r\n\r\n    window.addEventListener(\"resize\", setIframeHeight);\r\n</script>",
+        "content": " <iframe id=\"embeddedFrame\" src=\"#\" width=\"100%\" height=\"100%\"> </iframe>\r\n<script>\r\nvar iframe = document.getElementById(\"embeddedFrame\");\r\n    iframe.src = \"http://\"+window.location.hostname+\"${analysis_sm}\"+\"/all_graph?bucket=${const_bucket}&period=${period}&from=${__from}&to=${__to}\"\r\n\r\n    function setIframeHeightAndColor() {\r\n      iframe.style.borderWidth = \"0px\";\r\n      iframe.style.height = iframe.parentElement.offsetHeight + \"px\";\r\n    }\r\n\r\n    // Call setIframeHeight when the iframe content is loaded\r\n    iframe.onload = setIframeHeightAndColor;\r\n\r\n    window.addEventListener(\"resize\", setIframeHeightAndColor);\r\n</script>",
         "mode": "html"
       },
       "pluginVersion": "9.4.7",
@@ -339,6 +339,6 @@
   "timezone": "browser",
   "title": "Trend (All)",
   "uid": "i6b8d74Ik",
-  "version": 2,
+  "version": 3,
   "weekStart": ""
 }
